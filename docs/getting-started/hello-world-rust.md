@@ -128,7 +128,10 @@ fn main() -> Result<(), hdds::Error> {
 Create `src/bin/subscriber.rs`:
 
 ```rust
-use hdds::{Participant, QoS, TransportMode};
+use hdds::{
+    Participant, QoS, TransportMode, WaitSet,
+    dds::StatusMask,
+};
 use hdds_hello_world::Temperature;
 use std::time::Duration;
 
@@ -150,18 +153,27 @@ fn main() -> Result<(), hdds::Error> {
         .build()?;
     println!("DataReader created, waiting for data...");
 
-    // 3. Poll for samples in a loop
+    // 3. Use WaitSet for efficient blocking reads
+    let status_condition = reader.get_status_condition();
+    status_condition.set_enabled_statuses(StatusMask::DATA_AVAILABLE);
+    let waitset = WaitSet::new();
+    waitset.attach(&reader)?;
+
+    // 4. Poll for samples in a loop
     loop {
-        // Try to take available samples
-        while let Some(sample) = reader.try_take()? {
+        // WaitSet wait
+        let triggered = waitset.wait(None)?;
+        if triggered.is_empty() {
+            continue;
+        }
+
+        // Read samples
+        while let Some(sample) = reader.take()? {
             println!(
                 "Received: sensor={}, temp={:.1}C, time={}",
                 sample.sensor_id, sample.value, sample.timestamp
             );
         }
-
-        // Small delay to avoid busy-waiting
-        std::thread::sleep(Duration::from_millis(100));
     }
 }
 ```
